@@ -7,13 +7,35 @@ import scipy.stats
 from scipy.optimize import curve_fit
 #from ..kdtree import KDTree
 import pickle
-
+import random
+import math
 
 
 sourceFluxField='base_PsfFlux'
 
 color = {'all': 'grey', 'bright': 'blue',
          'iqr': 'green', 'rms': 'red'}
+
+srdSpec = {
+    'levels':("design", "minimum", "stretch"),
+    'PA1':{"design": 5, "minimum": 8, "stretch": 3}, 'pa1Units':'mmag',
+    'PF1':{"design": 10, "minimum": 20, "stretch": 5}, 'pf1Units':'%',
+    'PA2':{"design": 15, "minimum": 15, "stretch": 10}, 'pa2Units':'mmag',
+    'D1':5, 'd1Units':'arcmin',
+    'AM1':{"design": 10, "minimum": 20, "stretch": 5}, 'am1Units':'mas',
+    'AF1':{"design": 10, "minimum": 20, "stretch": 5}, 'af1Units':'%',
+    'AD1':{"design": 20, "minimum": 40, "stretch": 10},' ad1Units':'mas',
+    'D2':20, 'd2Units':'arcmin',
+    'AM2':{"design": 10, "minimum": 20, "stretch": 5}, 'am2Units':'mas',
+    'AF2':{"design": 10, "minimum": 20, "stretch": 5}, 'af2Units':'%',
+    'AD2':{"design": 20, "minimum": 40, "stretch": 10}, 'ad2Units':'mas',
+    'D3':200, 'd3Units':'arcmin',
+    'AM3':{"design": 15, "minimum": 30, "stretch": 10}, 'am3Units':'mas',
+    'AF3':{"design": 10, "minimum": 20, "stretch": 5}, 'af3Units':'%',
+    'AD3':{"design": 30, "minimum": 50, "stretch": 20}, 'ad3Units':'mas',
+}
+
+
 
 radToDeg = 180./np.pi
 degToArcs = 3600.
@@ -32,8 +54,10 @@ def load_pkl(name):
 class Comparaison_multiple:
 #    """ '/sps/lsst/dev/ciulli/Validation_lsst_lpc_git/test_validation_phVisits_peudevisites/sources_ndarray_grp_4visits.pkl'
 
-    def __init__(self, liste=[4,5,6,20]):#liste=[4,5,6,10,20,30,50,60]):
+    def __init__(self, liste=[4,5,6,20], dico=False):#liste=[4,5,6,10,20,30,50,60]):
         self.liste=liste
+        if dico:
+            self.SRCDICT={}
         for i in liste:
             num=str(i)
             print num
@@ -41,6 +65,10 @@ class Comparaison_multiple:
        
             exec("self.RA"+num+" = sourcesArray"+num+ "['coord_ra']")
             exec("self.Dec"+num+" = sourcesArray"+num+ "['coord_dec']")
+            if dico:
+                self.SRCDICT[i]={}
+                self.SRCDICT[i]['RA']=eval('np.array(self.RA'+num+')*radToDeg')
+                self.SRCDICT[i]['Dec']=eval('np.array(self.Dec'+num+')*radToDeg')
 
 
     def plotPos(self):
@@ -63,7 +91,6 @@ class Comparaison_multiple:
             plt.xlim(min(ra), max(ra))
             plt.ylim(min(dec), max(dec))
             compt+=1
-
 
 
 
@@ -302,16 +329,17 @@ def photErrModel(mag, sigmaSys, gamma, m5, **kwargs):# from check.py
 class LoadDataValidation:
     def __init__(self, file_path='/sps/lsst/dev/ciulli/Validation_lsst_lpc_git/test_validation/sources_ndarray_grp_16visits.pkl'):
         self.sources = load_pkl(file_path)
-        
-    def createVariablesForPlots(self):
-     
+
+
+    def createVariablesForPlots(self, additional=False, Extended=False ):
         RA_grp = []
         Dec_grp = []
         mag_grp = []
         snr_grp = []
         magerr_grp = []
         psf_fwhm_grp = []
-
+        if Extended:
+            extendedness_grp = []
 
         self.RA_mean= []
         self.Dec_mean = []
@@ -320,18 +348,25 @@ class LoadDataValidation:
         self.snr_med = []
         self.mag_rms = []
         self.magerr_med = []
-
-        self.deltaRAcosdecs = []
-        self.deltaDecs  = []
-        self.deltamags = []
-        self.RAcosDec_mean = []
-        self.RAcosDec_RMS = []
-        self.Dec_RMS = []
-        
-        self.Psf_fwhm_mean = []
-     
-        self.medsnrlong = []
+        if additional:
+            self.deltaRAcosdecs = []
+            self.deltaDecs  = []
+            self.deltamags = []
+            self.RAcosDec_mean = []
+            self.RAcosDec_RMS = []
+            self.Dec_RMS = []
+            self.Psf_fwhm_mean = []
+            self.medsnrlong = []
        
+        if Extended:
+            self.extendedness = []
+            self.maxextendedness = []
+
+          #  extended = np.max(cat.get(extendedKey))
+ 
+         #   psfSnr >= safeSnr and extended < safeMaxExtended
+            
+
         #test = []
         #testi = []
         #for i, j in enumerate(self.sources['Nb_group']):
@@ -350,11 +385,11 @@ class LoadDataValidation:
                 magerr_grp.append(self.sources[sourceFluxField+'_magerr'][i])
                 snr_grp.append(self.sources[sourceFluxField+'_snr'][i])
                 psf_fwhm_grp.append(self.sources['PSF-FWHM'][i])
+                if Extended:
+                    extendedness_grp.append(self.sources['base_ClassificationExtendedness_value'][i])
                 #testi.append(i)
             else:
-                # c'est ici qu'il faut faire les choses
-                # data_titles=['visit','ccd','coord_ra','coord_dec','MJD-OBS',sourceFluxField+'_snr',sourceFluxField+'_flux',sourceFluxField+'_fluxSigma',sourceFluxField+'_mag',sourceFluxField+'_magerr','Nb_group','id','PSF-FWHM','FLUXMAG0','FLUXMAG0ERR', 'MeanGrpRa', 'MeanGrpDec', 'MedGrpSnr']
-
+                # variables dans self.sources : ['visit','ccd','coord_ra','coord_dec','MJD-OBS',sourceFluxField+'_snr',sourceFluxField+'_flux',sourceFluxField+'_fluxSigma',sourceFluxField+'_mag',sourceFluxField+'_magerr','Nb_group','id','PSF-FWHM','FLUXMAG0','FLUXMAG0ERR', 'MeanGrpRa', 'MeanGrpDec', 'MedGrpSnr']
                 self.RA_mean.append(np.mean(RA_grp))
                 self.Dec_mean.append(np.mean(Dec_grp))
               #  print'ra meab',  np.mean(RA_grp),self.sources['MeanGrpRa'][i-1]
@@ -362,22 +397,21 @@ class LoadDataValidation:
                 self.posRMS.append(np.sqrt((np.std(RA_grp)* np.cos(np.mean(Dec_grp)))**2 + (np.std(Dec_grp))**2))
                 self.mag_mean.append(np.mean(mag_grp))
                 self.snr_med.append(np.median(snr_grp))
-                self.medsnrlong += [np.median(snr_grp)]*len(RA_grp)
-
                 self.mag_rms.append(np.std(mag_grp))
                 self.magerr_med.append(np.median(magerr_grp))
-              
-                self.deltaRAcosdecs += list((np.array(RA_grp)-np.mean(RA_grp))* np.cos(np.mean(Dec_grp)))
-                self.deltaDecs += list(np.array(Dec_grp)-np.mean(Dec_grp))
-                self.deltamags += list(np.array(mag_grp)-np.mean(mag_grp))
-                self.RAcosDec_mean.append(np.mean(RA_grp) * np.cos(np.mean(Dec_grp)))
-                self.RAcosDec_RMS.append(np.std(RA_grp) * np.cos(np.mean(Dec_grp)))
-                self.Dec_RMS.append(np.std(Dec_grp))
-                self.Psf_fwhm_mean.append(np.mean( psf_fwhm_grp))
-     
-             
 
-
+                if additional:
+                    self.medsnrlong += [np.median(snr_grp)]*len(RA_grp)
+                    self.deltaRAcosdecs += list((np.array(RA_grp)-np.mean(RA_grp))* np.cos(np.mean(Dec_grp)))
+                    self.deltaDecs += list(np.array(Dec_grp)-np.mean(Dec_grp))
+                    self.deltamags += list(np.array(mag_grp)-np.mean(mag_grp))
+                    self.RAcosDec_mean.append(np.mean(RA_grp) * np.cos(np.mean(Dec_grp)))
+                    self.RAcosDec_RMS.append(np.std(RA_grp) * np.cos(np.mean(Dec_grp)))
+                    self.Dec_RMS.append(np.std(Dec_grp))
+                    self.Psf_fwhm_mean.append(np.mean( psf_fwhm_grp))
+                if Extended:
+                    self.extendedness += list(extendedness_grp)
+                    self.maxextendedness += [ max(extendedness_grp)]*len(RA_grp)
             #    print 'test', test
             #    print 'testi', testi
 
@@ -389,6 +423,8 @@ class LoadDataValidation:
                 magerr_grp = []
                 snr_grp = []
                 Psf_fwhm_grp = []
+                if Extended:
+                    extendedness_grp = []
 
                # test = []
                # testi = []
@@ -399,6 +435,8 @@ class LoadDataValidation:
                 magerr_grp.append(self.sources[sourceFluxField+'_magerr'][i])
                 snr_grp.append(self.sources[sourceFluxField+'_snr'][i])
                 psf_fwhm_grp.append(self.sources['PSF-FWHM'][i])
+                if Extended:
+                    extendedness_grp.append(self.sources['base_ClassificationExtendedness_value'][i])
              #   self.sources['Nb_group']
 
       
@@ -409,19 +447,22 @@ class LoadDataValidation:
         self.posRMS.append(np.sqrt((np.std(RA_grp)* np.cos(np.mean(Dec_grp)))**2 + (np.std(Dec_grp))**2))
         self.mag_mean.append(np.mean(mag_grp))
         self.snr_med.append(np.median(snr_grp))
-        self.medsnrlong += [np.median(snr_grp)]*len(RA_grp)
+       
         self.mag_rms.append(np.std(mag_grp))
         self.magerr_med.append(np.median(magerr_grp))
 
-
-        self.deltaRAcosdecs += list((np.array(RA_grp)-np.mean(RA_grp))* np.cos(np.mean(Dec_grp)))
-        self.deltaDecs += list(np.array(Dec_grp)-np.mean(Dec_grp))
-        self.deltamags += list(np.array(mag_grp)-np.mean(mag_grp))
-        self.RAcosDec_mean.append(np.mean(RA_grp) * np.cos(np.mean(Dec_grp)))
-        self.RAcosDec_RMS.append(np.std(RA_grp) * np.cos(np.mean(Dec_grp)))
-        self.Dec_RMS.append(np.std(Dec_grp))
-        self.Psf_fwhm_mean.append(np.mean( psf_fwhm_grp))
-
+        if additional:
+            self.medsnrlong += [np.median(snr_grp)]*len(RA_grp)
+            self.deltaRAcosdecs += list((np.array(RA_grp)-np.mean(RA_grp))* np.cos(np.mean(Dec_grp)))
+            self.deltaDecs += list(np.array(Dec_grp)-np.mean(Dec_grp))
+            self.deltamags += list(np.array(mag_grp)-np.mean(mag_grp))
+            self.RAcosDec_mean.append(np.mean(RA_grp) * np.cos(np.mean(Dec_grp)))
+            self.RAcosDec_RMS.append(np.std(RA_grp) * np.cos(np.mean(Dec_grp)))
+            self.Dec_RMS.append(np.std(Dec_grp))
+            self.Psf_fwhm_mean.append(np.mean( psf_fwhm_grp))
+        if Extended:
+            self.extendedness += list(extendedness_grp)
+            self.maxextendedness += [ max(extendedness_grp)]*len(RA_grp)
 
         self.RA_mean = np.array(self.RA_mean)
         self.Dec_mean = np.array(self.Dec_mean)
@@ -431,15 +472,249 @@ class LoadDataValidation:
         self.mag_rms = np.array(self.mag_rms)
         self.magerr_med = np.array(self.magerr_med)
 
-        self.deltaRAcosdecs = np.array(self.deltaRAcosdecs)
-        self.deltaDecs = np.array(self.deltaDecs)
-        self.deltamags = np.array(self.deltamags)
-        self.RAcosDec_mean = np.array(self.RAcosDec_mean)
-        self.RAcosDec_RMS = np.array(self.RAcosDec_RMS)
-        self.Dec_RMS = np.array(self.Dec_RMS)
-        self.Psf_fwhm_mean = np.array(self.Psf_fwhm_mean)
-        self.medsnrlong = np.array(self.medsnrlong)
+        if additional:
+            self.deltaRAcosdecs = np.array(self.deltaRAcosdecs)
+            self.deltaDecs = np.array(self.deltaDecs)
+            self.deltamags = np.array(self.deltamags)
+            self.RAcosDec_mean = np.array(self.RAcosDec_mean)
+            self.RAcosDec_RMS = np.array(self.RAcosDec_RMS)
+            self.Dec_RMS = np.array(self.Dec_RMS)
+            self.Psf_fwhm_mean = np.array(self.Psf_fwhm_mean)
+            self.medsnrlong = np.array(self.medsnrlong)
 
+        if Extended:
+            self.extendedness = np.array(self.extendedness)
+            self.maxextendedness = np.array(self.maxextendedness)
+
+
+class Validation(LoadDataValidation):
+
+    def __init__(self, LOAD_val, additional=True, brightSnr=100., safeMaxExtended = 1.0):
+        # variables dans self.sources : ['visit','ccd','coord_ra','coord_dec','MJD-OBS',sourceFluxField+'_snr',sourceFluxField+'_flux',sourceFluxField+'_fluxSigma',sourceFluxField+'_mag',sourceFluxField+'_magerr','Nb_group','id','PSF-FWHM','FLUXMAG0','FLUXMAG0ERR', 'MeanGrpRa', 'MeanGrpDec', 'MedGrpSnr']
+        print "charge data"
+        self.sources=LOAD_val.sources
+        self.RA_mean = np.array(LOAD_val.RA_mean)
+        self.Dec_mean = np.array(LOAD_val.Dec_mean)
+        self.posRMS =  np.array(LOAD_val.posRMS)
+        self.mag_mean = np.array(LOAD_val.mag_mean)
+        self.snr_med = np.array(LOAD_val.snr_med)
+        self.mag_rms = np.array(LOAD_val.mag_rms)
+        self.magerr_med = np.array(LOAD_val.magerr_med)
+
+        if additional:
+            self.deltaRAcosdecs = np.array(LOAD_val.deltaRAcosdecs)
+            self.deltaDecs = np.array(LOAD_val.deltaDecs)
+            self.deltamags = np.array(LOAD_val.deltamags)
+            self.RAcosDec_mean = np.array(LOAD_val.RAcosDec_mean)
+            self.RAcosDec_RMS = np.array(LOAD_val.RAcosDec_RMS)
+            self.Dec_RMS = np.array(LOAD_val.Dec_RMS)
+            self.Psf_fwhm_mean = np.array(LOAD_val.Psf_fwhm_mean)
+            self.medsnrlong = np.array(LOAD_val.medsnrlong)
+
+        self.brightgrp, = np.where(self.medsnrlong>= brightSnr)
+        self.brightsources = self.sources[self.brightgrp]
+
+        if safeMaxExtended:
+            self.extendedness = LOAD_val.extendedness
+            self.maxextendedness = LOAD_val.maxextendedness 
+            self.extendedgrp, = np.where(self.maxextendedness[self.brightgrp] < safeMaxExtended)
+            self.brightsources = self.brightsources[ self.extendedgrp]
+
+
+    def afficher(self):
+        print 'validation'
+    
+
+    def calcPA1(self, numRandomShuffles=50):
+        iqrPA1=[]
+        for i in range(numRandomShuffles):
+
+            self.doCalcPA1( verbose=False)
+            print 'i, self.rmsSigma,self.iqrSigma',i,  self.rmsSigma, self.iqrSigma
+            iqrPA1.append(self.iqrSigma)
+
+        self.PA1 = np.mean(iqrPA1)
+        print 'PA1=', self.PA1 # PA1 of validate_drp
+
+
+    def doCalcPA1(self, verbose=False):
+
+        self.diffmags = []
+        self.magmean = []
+
+        idgrps=set(self.brightsources['Nb_group'])
+
+        for groupid in idgrps:
+            inside_grp,= np.where(self.brightsources['Nb_group'] == groupid)
+            mags_grp = self.brightsources[sourceFluxField+'_mag'][inside_grp]
+            np.random.shuffle(mags_grp)
+            diffmag = mags_grp[0] - mags_grp[1]
+            self.diffmags.append((1000/math.sqrt(2)) * diffmag)
+            self.magmean.append(np.mean( mags_grp))
+
+        self.diffmags = np.array(self.diffmags)
+        self.rmsSigma = math.sqrt(np.mean(self.diffmags**2))
+        self.iqrSigma = np.subtract.reduce(np.percentile(self.diffmags, [75, 25])) / (scipy.stats.norm.ppf(0.75)*2)
+
+        self.dmagsRMS = np.array(self.diffmags)
+
+
+
+
+    def plotPA1(self,outputPrefix=""):
+        """Plot the results of calculating the LSST SRC requirement PA1.
+        
+        Creates a file containing the plot with a filename beginning with `outputPrefix`.
+        
+        Parameters
+        ----------
+        pa1 : pipeBase.Struct
+        Must contain:
+        rms, iqr, magMean, magDiffs
+        rmsUnits, iqrUnits, magDiffsUnits
+        outputPrefix : str, optional
+        Prefix to use for filename of plot file.  Will also be used in plot titles.
+        E.g., outputPrefix='Cfht_output_r_' will result in a file named
+        'Cfht_output_r_AM1_D_5_arcmin_17.0-21.5.png'
+        for an AMx.name=='AM1' and AMx.magRange==[17, 21.5]
+        """
+        diffRange = (-100, +100)
+        
+        fig = plt.figure(figsize=(18, 12))
+        ax1 = fig.add_subplot(1, 2, 1)
+        ax1.scatter(self.magmean, self.diffmags, s=10, color=color['bright'], linewidth=0)
+        ax1.axhline(+self.rmsSigma , color=color['rms'], linewidth=3)
+        ax1.axhline(-self.rmsSigma, color=color['rms'], linewidth=3)
+        ax1.axhline(+self.iqrSigma, color=color['iqr'], linewidth=3)
+        ax1.axhline(-self.iqrSigma, color=color['iqr'], linewidth=3)
+        
+        ax2 = fig.add_subplot(1, 2, 2, sharey=ax1)
+        ax2.hist(self.diffmags, bins=25, range=diffRange,
+                 orientation='horizontal', histtype='stepfilled',
+                 normed=True, color=color['bright'])
+        ax2.set_xlabel("relative # / bin")
+        
+        yv = np.linspace(diffRange[0], diffRange[1], 100)
+        ax2.plot(scipy.stats.norm.pdf(yv, scale=self.rmsSigma), yv,
+                 marker='', linestyle='-', linewidth=3, color=color['rms'],
+                 label="PA1(RMS) = %4.2f %s" % (self.rmsSigma, 'mmag'))
+        ax2.plot(scipy.stats.norm.pdf(yv, scale=self.iqrSigma), yv,
+                 marker='', linestyle='-', linewidth=3, color=color['iqr'],
+                 label="PA1(IQR) = %4.2f %s" % (self.iqrSigma, 'mmag'))
+        ax2.set_ylim(*diffRange)
+        ax2.legend()
+        #    ax1.set_ylabel(u"12-pixel aperture magnitude diff (mmag)")
+        #    ax1.set_xlabel(u"12-pixel aperture magnitude")
+        ax1.set_xlabel("psf magnitude")
+        ax1.set_ylabel("psf magnitude diff (mmag)")
+        for label in ax2.get_yticklabels():
+            label.set_visible(False)
+
+        plt.suptitle("PA1: %s" % outputPrefix.rstrip('_'))
+        plotPath = "%s%s" % (outputPrefix, "PA1.png")
+        plt.savefig(plotPath, format="png")
+       # plt.close(fig)
+
+
+
+
+     #  print 'self.diffmags, self.rmsSigma,self.iqrSigma', self.diffmags, self.rmsSigma, self.iqrSigma
+
+    #    for i in range( numRandomShuffles):
+    #        groupnb1=0
+    #        groupnb2=0
+    #        while groupnb1 == groupnb2:
+    #            rand1=random.randint(0,len(self.brightsources))
+    #            rand2=random.randint(0,len(self.brightsources))
+    #            groupnb1=self.brightsources['Nb_group'][rand1]
+    #            groupnb2=self.brightsources['Nb_group'][rand2]
+    #            if groupnb1==groupnb2:
+    #                print ' groupnb1 == groupnb2 !!'
+    #                print 'groupnb1, groupnb2', groupnb1, groupnb2
+    #        inside_grp1,= np.where(self.brightsources['Nb_group'] == groupnb1)
+    #        inside_grp2,= np.where(self.brightsources['Nb_group'] == groupnb2)
+    #        mags_grp1 = self.brightsources[sourceFluxField+'_mag'][inside_grp1]
+    #        dmag_grp1 = mags_grp1-np.mean(mags_grp1)
+    #        mags_grp2 = self.brightsources[sourceFluxField+'_mag'][inside_grp2]
+    #        dmag_grp2 = mags_grp1-np.mean(mags_grp2)
+
+            #diffmags.append(self.brightsources[sourceFluxField+'_mag'][rand2]-self.brightsources[sourceFluxField+'_mag'][rand1])
+
+    #        diffmags.append(dmag_grp1-dmag_grp2)
+
+
+    def monPA1(self,  numRandom=False):
+        self.magmean = []
+        self.dmagsRMS=[]
+        if numRandom:
+            idgrps=[random.randint(0,len(set(self.brightsources['Nb_group']))) for n in range(numRandom)]
+            idgrps=self.brightsources['Nb_group'][idgrps]
+        else:
+            idgrps=set(self.brightsources['Nb_group'])
+
+        for groupid in idgrps:
+            inside_grp,= np.where(self.brightsources['Nb_group'] == groupid)
+          #  snr_grp = self.brightsources[sourceFluxField+'_snr'][inside_grp]
+          #  if np.median(snr_grp)>= brightSnr:
+            mags_grp = self.brightsources[sourceFluxField+'_mag'][inside_grp]
+            dmag_grp = mags_grp - np.mean(mags_grp)
+            self.magmean.append(np.mean( mags_grp))
+            self.dmagsRMS.append(np.std(dmag_grp))
+                #self.dmagsIQR.append(np.subtract.reduce(np.percentile(dmag_grp, [75, 25])) / (scipy.stats.norm.ppf(0.75)*2))
+        self.dmagsRMS = np.array(self.dmagsRMS)*1000
+        print 'len(self.dmagsRMS)',len(self.dmagsRMS)
+        self.PA1=np.median(self.dmagsRMS)
+
+        print 'PA1', self.PA1 # PA1 I have understood in LSST srd...
+        plt.figure()
+        digits=1000.
+        plt.hist(self.dmagsRMS, histtype='stepfilled')#, bins=20)
+        plt.axvline(self.PA1, color=color['rms'], linewidth=3, label='PA1(RMS) = '+str(int(self.PA1*digits)/digits)+'mmag')
+
+        plt.axvline(srdSpec['PA1']['design'], color='green', linewidth=3, label="PA1 'design' (LSST srd)= "+str(srdSpec['PA1']['design'])+'mmag')
+
+        plt.xlabel('Mag RMS (mmag)')
+        plt.ylabel('#/bin')
+        plt.legend()
+        plt.show()
+
+
+    def afficher_phot_req(self, level="design"):
+        print '======================================================='
+        print 'Comparison against *'+level+'* requirements.'
+        print 'Measured           Required      Passes        '      
+        print 'PA1 : ', self.PA1, 'mmag < ', srdSpec['PA1'][level], 'mmag ==', self.PA1 < srdSpec['PA1'][level]
+       
+        magDiffs=list(self.diffmags) #magDiffs
+       # print('lenmagdiffs', len(magDiffs), 'magDiffs',magDiffs)
+        PA2_spec = srdSpec['PA2']
+        PF1_percentiles = 100 - np.asarray([srdSpec['PF1'][l] for l in srdSpec['levels']])
+
+     
+        #PA2_measured = dict(zip(srdSpec['levels'],
+        #                        np.percentile(np.abs(magDiffs), PF1_percentiles)))
+        PF1_percentile = 100 - np.asarray(srdSpec['PF1'][level])
+        PA2_measured =  np.percentile(np.abs(magDiffs), PF1_percentile)
+       # print ' PA2_measured ', PA2_measured 
+
+        #PF1_measured = {l: 100*np.mean(np.asarray(magDiffs) > srdSpec['PA2'][l])
+        #                for l in srdSpec['levels']}
+
+        PF1_measured = 100*np.mean(np.asarray(magDiffs) > srdSpec['PA2'][level])
+              
+        
+        self.PF1=PF1_measured
+        self.PA2=PA2_measured
+
+
+        print 'PF1 : ', self.PF1, '%    < ', srdSpec['PF1'][level], '%    ==', self.PF1 < srdSpec['PF1'][level]
+        print 'PA2 : ', self.PA2, 'mmag < ', srdSpec['PA2'][level], 'mmag ==', self.PA2 < srdSpec['PA2'][level]
+        ### to do
+        print 'PA3 : ' # spatial uniformity of photometric zeropoints
+        print 'PF2 : ' # 
+        print 'PA4 : ' # 
+        print 'PA5 : ' # band to band (flux ratio) photometric calibration  (besoin de plusieurs filtres a la fois)
+        print 'PA6 : ' # overall external absolute photometry
 
 
 class Validation_plots(LoadDataValidation):
@@ -513,7 +788,7 @@ class Validation_plots(LoadDataValidation):
       
         plotPath = outputPrefix+"check_astrometry.png"
         plt.savefig(plotPath, format="png")
-        plt.close(fig)
+        #plt.close(fig)
        
 
 
@@ -628,7 +903,7 @@ class Validation_plots(LoadDataValidation):
         plotPath = outputPrefix+"check_photometry.png"
         plt.savefig(plotPath, format="png")
       #  plt.show()
-        plt.close(fig)
+       # plt.close(fig)
 
 
     def plotVisitVsTime(self,
@@ -717,7 +992,7 @@ class Validation_plots(LoadDataValidation):
     #brightallsnr, = np.where(np.asarray(sourcesnr) > brightSnr)
         brightallsnr, = np.where(np.asarray(medsnrlong) > brightSnr) #pour avoir des plots comparables (meme cut sur les snr medianes)
     #    print '  brightallsnr',  brightallsnr
-        plt.close('all')
+        #plt.close('all')
         plt.figure(figsize=(12,12))
         if zoom:
             bri,=np.where(np.array(medsnr) >= brightSnr)
@@ -792,7 +1067,7 @@ class Validation_plots(LoadDataValidation):
         plt.savefig(plotPath, format="png")
 
 
-        plt.close('all')
+       # plt.close('all')
         plt.figure()
         plt.title('racosdec')
         plt.scatter(grpMeanRAcosdec, groupRMSracosdec, color=color['all'], label='all')
@@ -1105,20 +1380,29 @@ class Validation_plots(LoadDataValidation):
 
 if __name__=="__main__":
   
-  #  AAA=Comparaison_multiple()
+  #  AAA=Comparaison_multiple(liste=[4,5,6,10,20,30,50,60])
   #  AAA.plotPos()
 
-    LDV = LoadDataValidation(file_path='/sps/lsst/dev/ciulli/Validation_lsst_lpc_git/test_validation/sources_ndarray_grp_16visits.pkl')
- #   LDV.createVariablesForPlots()
+    #LDV = LoadDataValidation(file_path='/sps/lsst/dev/ciulli/Validation_lsst_lpc_git/test_validation/sources_ndarray_grp_16visits.pkl')
+
+    LDV = LoadDataValidation(file_path='/sps/lsst/dev/ciulli/Validation_lsst_lpc_git/test_validation/Tests/sources_ndarray_grp_6visits.pkl')
+
     
 
-    PLTV=Validation_plots(LDV.sources)
+    PLTV = Validation_plots(LDV.sources)
     # PLTV.plotVisitVsTime() # plot fonctionnel
-
-    PLTV.createVariablesForPlots()
+    PLTV.createVariablesForPlots(additional=True, Extended=True)
+    #PLTV.createVariablesForPlots(additional=False)
     print 'Data Loaded'
-    # PLTV.plotAstrometry( LDV.posRMS*radToMas, LDV.mag_mean, LDV.snr_med) # plot fonctionnel, probleme d'initialisation des parametre du fit a regler... voir ce qui est fait dans validate_drp
+    PLTV.plotAstrometry( PLTV.posRMS*radToMas, PLTV.mag_mean, PLTV.snr_med) # plot fonctionnel, probleme d'initialisation des parametre du fit a regler... voir ce qui est fait dans validate_drp
 
-   # PLTV.plotPhotometry(LDV.mag_mean, LDV.snr_med, LDV.magerr_med*1000, LDV.mag_rms*1000) #idem 
+    PLTV.plotPhotometry(PLTV.mag_mean, PLTV.snr_med, PLTV.magerr_med*1000, PLTV.mag_rms*1000) #idem 
                    # fit_params={'sigmaSysUnits': 'mmag', 'sigmaSys': 0.00067729702863904555, 'm5': 24.578444282189267, 'gammaUnits': '', 'm5Units': 'mag', 'gamma': 0.03914245347332538})
-print 'programme termine'
+  
+
+    PLTV.plotAstromPhotRMSvsTimeCcd()
+    print 'programme termine'
+
+    plt.close('all')
+    ZZ=Validation(PLTV)
+    ZZ.calcPA1()
