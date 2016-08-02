@@ -666,6 +666,28 @@ class Validation(LoadDataValidation):
         self.PA1=np.median(self.dmagsRMS)
 
         print 'PA1', self.PA1 # PA1 I have understood in LSST srd...
+
+        level="design"
+        print '======================================================='
+        print 'Comparison against *'+level+'* requirements (avec calcul magsRMS, pas celui dans validate_drp).'
+        print 'Measured           Required      Passes        '      
+        print 'PA1 : ', self.PA1, 'mmag < ', srdSpec['PA1'][level], 'mmag ==', self.PA1 < srdSpec['PA1'][level]
+       
+        magDiffs=list(self.dmagsRMS) #magDiffs
+       # print('lenmagdiffs', len(magDiffs), 'magDiffs',magDiffs)
+        PA2_spec = srdSpec['PA2']
+        PF1_percentiles = 100 - np.asarray([srdSpec['PF1'][l] for l in srdSpec['levels']])
+        PF1_percentile = 100 - np.asarray(srdSpec['PF1'][level])
+        PA2_measured =  np.percentile(np.abs(magDiffs), PF1_percentile)
+        PF1_measured = 100*np.mean(np.asarray(magDiffs) > srdSpec['PA2'][level])
+        self.PF1=PF1_measured
+        self.PA2=PA2_measured
+        print 'PF1 : ', self.PF1, '%    < ', srdSpec['PF1'][level], '%    ==', self.PF1 < srdSpec['PF1'][level]
+        print 'PA2 : ', self.PA2, 'mmag < ', srdSpec['PA2'][level], 'mmag ==', self.PA2 < srdSpec['PA2'][level]
+      
+
+
+
         plt.figure()
         digits=1000.
         plt.hist(self.dmagsRMS, histtype='stepfilled')#, bins=20)
@@ -689,24 +711,11 @@ class Validation(LoadDataValidation):
        # print('lenmagdiffs', len(magDiffs), 'magDiffs',magDiffs)
         PA2_spec = srdSpec['PA2']
         PF1_percentiles = 100 - np.asarray([srdSpec['PF1'][l] for l in srdSpec['levels']])
-
-     
-        #PA2_measured = dict(zip(srdSpec['levels'],
-        #                        np.percentile(np.abs(magDiffs), PF1_percentiles)))
         PF1_percentile = 100 - np.asarray(srdSpec['PF1'][level])
         PA2_measured =  np.percentile(np.abs(magDiffs), PF1_percentile)
-       # print ' PA2_measured ', PA2_measured 
-
-        #PF1_measured = {l: 100*np.mean(np.asarray(magDiffs) > srdSpec['PA2'][l])
-        #                for l in srdSpec['levels']}
-
         PF1_measured = 100*np.mean(np.asarray(magDiffs) > srdSpec['PA2'][level])
-              
-        
         self.PF1=PF1_measured
         self.PA2=PA2_measured
-
-
         print 'PF1 : ', self.PF1, '%    < ', srdSpec['PF1'][level], '%    ==', self.PF1 < srdSpec['PF1'][level]
         print 'PA2 : ', self.PA2, 'mmag < ', srdSpec['PA2'][level], 'mmag ==', self.PA2 < srdSpec['PA2'][level]
         ### to do
