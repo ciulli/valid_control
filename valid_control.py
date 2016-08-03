@@ -1,4 +1,3 @@
-
 import pylab as plt
 import numpy as np
 import matplotlib.pylab as plt
@@ -36,11 +35,12 @@ srdSpec = {
 }
 
 
-
 radToDeg = 180./np.pi
 degToArcs = 3600.
 radToArcs = radToDeg * degToArcs
 radToMas = radToArcs *1000
+
+radToArcmin = radToDeg *60
 
 def save_pkl(obj, name):
     with open( name + '.pkl', 'wb') as f:
@@ -323,6 +323,64 @@ def photErrModel(mag, sigmaSys, gamma, m5, **kwargs):# from check.py
     sigmaSq = sigmaSys**2 + sigmaRandSq
     return np.sqrt(sigmaSq)
 
+def sphDist(ra1, dec1, ra2, dec2):
+    """Calculate distance on the surface of a unit sphere.
+    Input and Output are in radians.
+    Notes
+    -----
+    Uses the Haversine formula to preserve accuracy at small angles.
+    Law of cosines approach doesn't work well for the typically very small
+    differences that we're looking at here.
+    """
+    # Haversine
+    dra = ra1-ra2
+    ddec = dec1-dec2
+    a = np.square(np.sin(ddec/2)) + \
+        np.cos(dec1)*np.cos(dec2)*np.square(np.sin(dra/2))
+    dist = 2 * np.arcsin(np.sqrt(a))
+
+    # This is what the law of cosines would look like
+#    dist = np.arccos(np.sin(dec1)*np.sin(dec2) + np.cos(dec1)*np.cos(dec2)*np.cos(ra1 - ra2))
+    return dist
+
+
+def matchVisitComputeDistance(visit_obj1, ra_obj1, dec_obj1,
+                              visit_obj2, ra_obj2, dec_obj2):
+    """Calculate obj1-obj2 distance for each visit in which both objects are seen.
+
+    For each visit shared between visit_obj1 and visit_obj2,
+    calculate the spherical distance between the obj1 and obj2.
+
+    Parameters
+    ----------
+    visit_obj1 : scalar, list, or numpy.array of int or str
+        List of visits for object 1.
+    ra_obj1 : scalar, list, or numpy.array of float
+        List of RA in each visit for object 1.
+    dec_obj1 : scalar, list or numpy.array of float
+        List of Dec in each visit for object 1.
+    visit_obj2 : list or numpy.array of int or str
+        List of visits for object 2.
+    ra_obj2 : list or numpy.array of float
+        List of RA in each visit for object 2.
+    dec_obj2 : list or numpy.array of float
+        List of Dec in each visit for object 2.
+
+    Results
+    -------
+    list of float
+        spherical distances (in radians) for matching visits.
+    """
+    distances = []
+    for i in range(len(visit_obj1)):
+        for j in range(len(visit_obj2)):
+            if (visit_obj1[i] == visit_obj2[j]):
+                if np.isfinite([ra_obj1[i], dec_obj1[i],
+                                ra_obj2[j], dec_obj2[j]]).all():
+                    distances.append(sphDist(ra_obj1[i], dec_obj1[i],
+                                             ra_obj2[j], dec_obj2[j]))
+
+    return distances
 
 
 
@@ -357,15 +415,11 @@ class LoadDataValidation:
             self.Dec_RMS = []
             self.Psf_fwhm_mean = []
             self.medsnrlong = []
-       
+            self.medmaglong = []
+
         if Extended:
             self.extendedness = []
             self.maxextendedness = []
-
-          #  extended = np.max(cat.get(extendedKey))
- 
-         #   psfSnr >= safeSnr and extended < safeMaxExtended
-            
 
         #test = []
         #testi = []
@@ -402,6 +456,7 @@ class LoadDataValidation:
 
                 if additional:
                     self.medsnrlong += [np.median(snr_grp)]*len(RA_grp)
+                    self.medmaglong  += [np.median(mag_grp)]*len(RA_grp)
                     self.deltaRAcosdecs += list((np.array(RA_grp)-np.mean(RA_grp))* np.cos(np.mean(Dec_grp)))
                     self.deltaDecs += list(np.array(Dec_grp)-np.mean(Dec_grp))
                     self.deltamags += list(np.array(mag_grp)-np.mean(mag_grp))
@@ -453,6 +508,7 @@ class LoadDataValidation:
 
         if additional:
             self.medsnrlong += [np.median(snr_grp)]*len(RA_grp)
+            self.medmaglong += [np.median(mag_grp)]*len(RA_grp)
             self.deltaRAcosdecs += list((np.array(RA_grp)-np.mean(RA_grp))* np.cos(np.mean(Dec_grp)))
             self.deltaDecs += list(np.array(Dec_grp)-np.mean(Dec_grp))
             self.deltamags += list(np.array(mag_grp)-np.mean(mag_grp))
@@ -481,7 +537,7 @@ class LoadDataValidation:
             self.Dec_RMS = np.array(self.Dec_RMS)
             self.Psf_fwhm_mean = np.array(self.Psf_fwhm_mean)
             self.medsnrlong = np.array(self.medsnrlong)
-
+            self.medmaglong = np.array(self.medmaglong)
         if Extended:
             self.extendedness = np.array(self.extendedness)
             self.maxextendedness = np.array(self.maxextendedness)
@@ -510,11 +566,15 @@ class Validation(LoadDataValidation):
             self.Dec_RMS = np.array(LOAD_val.Dec_RMS)
             self.Psf_fwhm_mean = np.array(LOAD_val.Psf_fwhm_mean)
             self.medsnrlong = np.array(LOAD_val.medsnrlong)
+            self.medmaglong = np.array(LOAD_val.medmaglong)
+
+        self.brightSnr = brightSnr
 
         self.brightgrp, = np.where(self.medsnrlong>= brightSnr)
         self.brightsources = self.sources[self.brightgrp]
 
         if safeMaxExtended:
+            self.safeMaxExtended = safeMaxExtended
             self.extendedness = LOAD_val.extendedness
             self.maxextendedness = LOAD_val.maxextendedness 
             self.extendedgrp, = np.where(self.maxextendedness[self.brightgrp] < safeMaxExtended)
@@ -524,15 +584,16 @@ class Validation(LoadDataValidation):
     def afficher(self):
         print 'validation'
     
-
+    # Photometry SRD
     def calcPA1(self, numRandomShuffles=50):
         iqrPA1=[]
+        self.bigdiffmags=[]
         for i in range(numRandomShuffles):
 
             self.doCalcPA1( verbose=False)
             print 'i, self.rmsSigma,self.iqrSigma',i,  self.rmsSigma, self.iqrSigma
             iqrPA1.append(self.iqrSigma)
-
+            self.bigdiffmags+=list(self.diffmags)
         self.PA1 = np.mean(iqrPA1)
         print 'PA1=', self.PA1 # PA1 of validate_drp
 
@@ -542,7 +603,7 @@ class Validation(LoadDataValidation):
         self.diffmags = []
         self.magmean = []
 
-        idgrps=set(self.brightsources['Nb_group'])
+        idgrps = set(self.brightsources['Nb_group'])
 
         for groupid in idgrps:
             inside_grp,= np.where(self.brightsources['Nb_group'] == groupid)
@@ -615,9 +676,6 @@ class Validation(LoadDataValidation):
         plt.savefig(plotPath, format="png")
        # plt.close(fig)
 
-
-
-
      #  print 'self.diffmags, self.rmsSigma,self.iqrSigma', self.diffmags, self.rmsSigma, self.iqrSigma
 
     #    for i in range( numRandomShuffles):
@@ -643,6 +701,7 @@ class Validation(LoadDataValidation):
     #        diffmags.append(dmag_grp1-dmag_grp2)
 
 
+
     def monPA1(self,  numRandom=False):
         self.magmean = []
         self.dmagsRMS=[]
@@ -664,15 +723,13 @@ class Validation(LoadDataValidation):
         self.dmagsRMS = np.array(self.dmagsRMS)*1000
         print 'len(self.dmagsRMS)',len(self.dmagsRMS)
         self.PA1=np.median(self.dmagsRMS)
-
         print 'PA1', self.PA1 # PA1 I have understood in LSST srd...
-
         level="design"
         print '======================================================='
         print 'Comparison against *'+level+'* requirements (avec calcul magsRMS, pas celui dans validate_drp).'
         print 'Measured           Required      Passes        '      
         print 'PA1 : ', self.PA1, 'mmag < ', srdSpec['PA1'][level], 'mmag ==', self.PA1 < srdSpec['PA1'][level]
-       
+        
         magDiffs=list(self.dmagsRMS) #magDiffs
        # print('lenmagdiffs', len(magDiffs), 'magDiffs',magDiffs)
         PA2_spec = srdSpec['PA2']
@@ -684,9 +741,6 @@ class Validation(LoadDataValidation):
         self.PA2=PA2_measured
         print 'PF1 : ', self.PF1, '%    < ', srdSpec['PF1'][level], '%    ==', self.PF1 < srdSpec['PF1'][level]
         print 'PA2 : ', self.PA2, 'mmag < ', srdSpec['PA2'][level], 'mmag ==', self.PA2 < srdSpec['PA2'][level]
-      
-
-
 
         plt.figure()
         digits=1000.
@@ -707,7 +761,9 @@ class Validation(LoadDataValidation):
         print 'Measured           Required      Passes        '      
         print 'PA1 : ', self.PA1, 'mmag < ', srdSpec['PA1'][level], 'mmag ==', self.PA1 < srdSpec['PA1'][level]
        
-        magDiffs=list(self.diffmags) #magDiffs
+        #magDiffs=list(self.diffmags) #magDiffs # c'est comme ca que c'est dans validate drp
+        magDiffs=list(self.bigdiffmags) # plus logique de les prendre tous (?)
+
        # print('lenmagdiffs', len(magDiffs), 'magDiffs',magDiffs)
         PA2_spec = srdSpec['PA2']
         PF1_percentiles = 100 - np.asarray([srdSpec['PF1'][l] for l in srdSpec['levels']])
@@ -716,14 +772,177 @@ class Validation(LoadDataValidation):
         PF1_measured = 100*np.mean(np.asarray(magDiffs) > srdSpec['PA2'][level])
         self.PF1=PF1_measured
         self.PA2=PA2_measured
-        print 'PF1 : ', self.PF1, '%    < ', srdSpec['PF1'][level], '%    ==', self.PF1 < srdSpec['PF1'][level]
-        print 'PA2 : ', self.PA2, 'mmag < ', srdSpec['PA2'][level], 'mmag ==', self.PA2 < srdSpec['PA2'][level]
+        print 'PF1 : ', str(np.round(self.PF1,2)), '%    < ', srdSpec['PF1'][level], '%    ==', self.PF1 < srdSpec['PF1'][level]
+        print 'PA2 : ', str(np.round(self.PA2,2)), 'mmag < ', srdSpec['PA2'][level], 'mmag ==', self.PA2 < srdSpec['PA2'][level]
         ### to do
         print 'PA3 : ' # spatial uniformity of photometric zeropoints
         print 'PF2 : ' # 
         print 'PA4 : ' # 
         print 'PA5 : ' # band to band (flux ratio) photometric calibration  (besoin de plusieurs filtres a la fois)
         print 'PA6 : ' # overall external absolute photometry
+
+
+    # Astrometry SRD
+    def calcAM1(self, *args, **kwargs):
+        """Calculate the SRD definition of astrometric performance for AM1
+        
+        See `calcAMx` for more details."""
+        return self.calcAMx(*args, x=1, D=srdSpec['D1'], width=2, **kwargs)
+
+    
+    def calcAM2(self, *args, **kwargs):
+        """Calculate the SRD definition of astrometric performance for AM2
+        
+        See `calcAMx` for more details."""
+        return self.calcAMx(*args, x=2, D=srdSpec['D2'], width=2, **kwargs)
+    
+    
+    def calcAM3(self, *args, **kwargs):
+        """Calculate the SRD definition of astrometric performance for AM3
+        
+        See `calcAMx` for more details."""
+        return self.calcAMx(*args, x=3, D=srdSpec['D3'], width=2, **kwargs)
+
+
+    def calcAMx(self,D=5, width=2, magRange=None,
+                x=None, level="design",
+                verbose=False):
+
+        AMx_spec = srdSpec['AM'+str(x)][level]
+        AFx_spec = srdSpec['AF'+str(x)][level]
+        ADx_spec = srdSpec['AD'+str(x)][level]
+        # print '  AMx_spec, AFx_spec, ADx_spec',  AMx_spec, AFx_spec, ADx_spec
+        annulus = D + (width/2)*np.array([-1, +1])
+
+        rmsDistances, annulus, magRange =  self.calcRmsDistances(annulus, magRange=magRange, verbose=verbose)
+        if not list(rmsDistances):
+            raise ValidateErrorNoStars('No stars found that are %.1f--%.1f arcmin apart.' %
+                                       (annulus[0], annulus[1]))
+
+        rmsDistMas = radToMas * np.array(rmsDistances)
+        AMx = np.median(rmsDistMas)
+        fractionOver = np.mean(np.asarray(rmsDistMas) > AMx_spec+ADx_spec)
+        percentOver = 100*fractionOver
+        self.AMx={'AM'+str(x): AMx}
+        print 'AM'+str(x), str(np.round(AMx,2)) ,'mas  < ',  srdSpec['AM'+str(x)][level], 'mas  ==',AMx < srdSpec['AM'+str(x)][level]
+        print 'AF'+str(x),str(np.round( percentOver,2)),'%    < ',  srdSpec['AF'+str(x)][level], '%    ==', percentOver < srdSpec['AF'+str(x)][level]
+        print 'AD'+str(x), '?'
+
+
+    def calcRmsDistances(self, annulus, magRange=None, verbose=False):
+ 
+        if magRange is None:
+            magRange = [17.0, 21.5]
+
+        # calculate safematchees with maginrange:
+        medianMag=self.medmaglong
+        self.magranged, = np.where( (magRange[0] <= medianMag) & (medianMag < magRange[1]) & (self.medsnrlong >= self.brightSnr) & (self.maxextendedness < self.safeMaxExtended))
+        self.magrangedsources = self.sources[ self.magranged]
+        # print 'len(self.magrangedsources), len(self.brightsources), len(self.sources) ',len(self.magrangedsources), len(self.brightsources), len(self.sources)
+
+        ra = self.magrangedsources['coord_ra']
+        dec = self.magrangedsources['coord_dec']
+        visit = self.magrangedsources['visit']
+        annulusRadians = annulus * (1./(60.*radToDeg ))
+        # print annulusRadians
+        self.meanRa = []
+        self.meanDec = []
+        self.nbgroup = []
+
+        idgrps=set(self.magrangedsources['Nb_group'])
+        for groupid in idgrps:
+            inside_grp, = np.where(self.magrangedsources['Nb_group'] == groupid)
+            ra_grp = self.magrangedsources['coord_ra'][inside_grp]
+            dec_grp = self.magrangedsources['coord_dec'][inside_grp]
+          
+            self.meanRa.append(np.mean(ra_grp ))
+            self.meanDec.append(np.mean(dec_grp ))
+            self.nbgroup.append(groupid)
+
+        # print 'len( self.meanDec)',len( self.meanDec)
+
+        rmsDistances = list()
+        # ### pour les plots
+        D=(annulus[0]+annulus[1])/2#
+        meanDistances = list() #
+        rms_obj_racosdecs = [] #
+        rms_obj_decs = [] #
+        sizelegend=12 #
+        digits=1000.#
+
+       # for obj1, (ra1, dec1, visit1) in enumerate(zip(meanRa, meanDec, visit)):
+        for obj1, (ra1, dec1) in enumerate(zip(self.meanRa, self.meanDec)):
+         
+            dist = sphDist(ra1, dec1, self.meanRa[obj1+1:], self.meanDec[obj1+1:])
+           # print 'dist', dist
+
+            objectsInAnnulus, = np.where((annulusRadians[0] <= dist) & (dist < annulusRadians[1]))
+            # print ' objectsInAnnulus', objectsInAnnulus
+            objectsInAnnulus += 1 + obj1 # Correction des indices pour avoir les bons D
+            # print ' objectsInAnnulus correct', objectsInAnnulus
+            inside_obj1, = np.where(self.magrangedsources['Nb_group'] == self.nbgroup[obj1])
+            
+            visits_obj1 = self.magrangedsources['visit'][inside_obj1]
+            ra_obj1 = self.magrangedsources['coord_ra'][inside_obj1]
+            dec_obj1 = self.magrangedsources['coord_dec'][inside_obj1]
+            # print 'check if MEAN RA is ok for obj1', np.mean(ra_obj1), self.meanRa[obj1] # OK
+            # print 'check if MEAN Dec is ok for obj1', np.mean(dec_obj1), self.meanDec[obj1]
+       
+            # print "obj1,   self.magrangedsources['Nb_group'][inside_obj1]", obj1, '   ',self.magrangedsources['Nb_group'][inside_obj1]
+            for obj2 in objectsInAnnulus:
+               
+                inside_obj2, = np.where(self.magrangedsources['Nb_group'] == self.nbgroup[obj2])
+                visits_obj2 = self.magrangedsources['visit'][inside_obj2]
+                ra_obj2 = self.magrangedsources['coord_ra'][inside_obj2]
+                dec_obj2 = self.magrangedsources['coord_dec'][inside_obj2]
+                # print "obj2,  self.magrangedsources['Nb_group'][inside_obj2]",obj2, '   ', self.magrangedsources['Nb_group'][inside_obj2]
+                
+                # print 'check mean distance= ', radToArcmin *sphDist(ra1, dec1, self.meanRa[obj2], self.meanDec[obj2]) # OK
+                # print 'check if MEAN RA is ok for obj2', np.mean(ra_obj2), self.meanRa[obj2] # OK
+                # print 'check if MEAN Dec is ok for obj2', np.mean(dec_obj2), self.meanDec[obj2]
+                distances = matchVisitComputeDistance(visits_obj1, ra_obj1, dec_obj1,
+                                                      visits_obj2, ra_obj2, dec_obj2)
+                # print 'check radToArcmin *distances ', np.array(distances)* radToArcmin # probleme ici
+                if not distances:
+                    if verbose:
+                        print("No matching visits found for objs: %d and %d" % (obj1, obj2))
+                    continue
+                finiteEntries, = np.where(np.isfinite(distances))
+                if len(finiteEntries) > 0:
+                    rmsDist = np.std(np.array(distances)[finiteEntries])
+                    rmsDistances.append(rmsDist)
+                    # ### pour plot de test distribution des D
+                    meanDist=np.mean(radToArcmin * (np.array(distances)[finiteEntries]))
+                    meanDistances.append(meanDist)
+                    # ## 
+
+        # ### plots de test distribution des D
+        rmsDistances=np.array(rmsDistances)
+        meanDistances=np.array(meanDistances)
+        if (int(D)==5 or int(D)==20):
+
+            plt.figure(figsize=(11,7))
+            plt.title('meanDists (arcmin) pour D='+str(D))
+            plt.hist( meanDistances, label='RMS='+str(int(np.std(meanDistances)*digits)/digits)+'Arcmin\nMean='+str(int(np.mean(meanDistances)*digits)/digits)+'Arcmin\nMedian='+str(int(np.median(meanDistances)*digits)/digits)+'Arcmin')
+            plt.legend(prop={'size':sizelegend})
+            plt.xlabel('meanDists (Arcmin)')
+            plt.ylabel('#/bin')
+            plotPath = 'AstromMeanDists'+str(D)+'.png'
+            plt.savefig(plotPath, format="png")
+            
+            plt.figure(figsize=(11,7))
+            plt.title('rmsDist (equiv plot AMx) pour D='+str(D))
+            plt.hist(radToMas * (rmsDistances), label='RMS='+str(int(np.std(radToMas * (rmsDistances))*digits)/digits)+'mArcs\nMean='+str(int(np.mean(radToMas * (rmsDistances))*digits)/digits)+'mArcs\nMedian='+str(int(np.median(radToMas * (rmsDistances))*digits)/digits)+'mArcs')
+            plt.legend(prop={'size':sizelegend})
+            plt.xlabel('meanDists (Arcmin)')
+            plt.xlabel('rmsDists (mArcs)')
+            plt.ylabel('#/bin')
+            plotPath = 'AstromRmsDists'+str(D)+'.png'
+            plt.savefig(plotPath, format="png")
+            #  plt.show()
+ 
+        return rmsDistances, annulus, magRange
+ 
 
 
 class Validation_plots(LoadDataValidation):
@@ -1415,3 +1634,8 @@ if __name__=="__main__":
     plt.close('all')
     ZZ=Validation(PLTV)
     ZZ.calcPA1()
+    ZZ.afficher_phot_req()
+    #  ZZ.monPA1() # ma version de PA1
+
+    # ZZ.calcAM1() a implementer
+    # ZZ.calcAM2()
